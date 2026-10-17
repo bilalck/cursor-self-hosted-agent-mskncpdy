@@ -8,6 +8,11 @@ export interface LinearWebhookPayload {
   createdAt: string;
   webhookTimestamp?: number;
   data?: Record<string, unknown>;
+  /**
+   * Linear includes previous values for fields that changed on `update`.
+   * Unrelated edits (status, assignee, …) omit `description` here.
+   */
+  updatedFrom?: Record<string, unknown>;
   url?: string;
 }
 
@@ -63,21 +68,22 @@ export function extractLinearTaskRequest(
     }
   }
 
-  if (
-    payload.type === "Issue" &&
-    (payload.action === "create" || payload.action === "update")
-  ) {
-    const description = asString(payload.data?.description);
-    const issueId = asString(payload.data?.id);
-    const title = asString(payload.data?.title);
-    const prompt = extractPrefixedPrompt(description, commandPrefix);
+  if (payload.type === "Issue" && payload.action === "create") {
+    return issueTaskFromDescription(payload.data, commandPrefix, undefined);
+  }
 
-    if (issueId && prompt) {
-      return {
-        issueId,
-        prompt: title ? `${prompt}\n\nLinear issue: ${title}` : prompt,
-      };
+  if (payload.type === "Issue" && payload.action === "update") {
+    // Status/assignee/label changes still include the current description.
+    // Only treat a description edit that newly (or differently) embeds the
+    // command as a launch — otherwise every issue bump would spawn agents.
+    if (!descriptionFieldChanged(payload.updatedFrom)) {
+      return null;
     }
+    return issueTaskFromDescription(
+      payload.data,
+      commandPrefix,
+      asString(payload.updatedFrom?.description),
+    );
   }
 
   return null;
@@ -164,6 +170,36 @@ async function postLinearComment(
       `Linear commentCreate failed${message ? `: ${message}` : ""}`,
     );
   }
+}
+
+function issueTaskFromDescription(
+  data: Record<string, unknown> | undefined,
+  commandPrefix: string,
+  previousDescription: string | undefined,
+): LinearTaskRequest | null {
+  const description = asString(data?.description);
+  const issueId = asString(data?.id);
+  const title = asString(data?.title);
+  const prompt = extractPrefixedPrompt(description, commandPrefix);
+  const previousPrompt = extractPrefixedPrompt(
+    previousDescription,
+    commandPrefix,
+  );
+
+  if (!issueId || !prompt || prompt === previousPrompt) {
+    return null;
+  }
+
+  return {
+    issueId,
+    prompt: title ? `${prompt}\n\nLinear issue: ${title}` : prompt,
+  };
+}
+
+function descriptionFieldChanged(
+  updatedFrom: Record<string, unknown> | undefined,
+): boolean {
+  return Boolean(updatedFrom && Object.hasOwn(updatedFrom, "description"));
 }
 
 function extractPrefixedPrompt(

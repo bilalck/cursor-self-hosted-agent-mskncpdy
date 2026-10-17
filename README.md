@@ -143,7 +143,7 @@ Point a Linear webhook at:
 POST /providers/linear/webhooks
 ```
 
-The service listens for commands embedded in issue descriptions or new comments. By default, the command prefix is `@cursor`.
+The service listens for commands in **new comments** and in **issue descriptions when the description is created or the `@cursor` command in it actually changes**. Unrelated issue updates (status, assignee, labels) do not launch another agent. By default, the command prefix is `@cursor`.
 
 Examples:
 
